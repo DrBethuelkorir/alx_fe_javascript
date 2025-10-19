@@ -13,14 +13,14 @@ let quotes = [
 ];
 
 // DOM elements
-const quoteDisplay = document.getElementById('quoteText');
-const quoteAuthor = document.getElementById('quoteAuthor');
-const quoteCategory = document.getElementById('quoteCategory');
-const newQuoteBtn = document.getElementById('newQuote');
-const categorySelect = document.getElementById('categorySelect');
-const addQuoteBtn = document.getElementById('addQuoteBtn');
-const resetFormBtn = document.getElementById('resetForm');
-const notification = document.getElementById('notification');
+let quoteDisplay;
+let quoteAuthor;
+let quoteCategoryElement;
+let newQuoteBtn;
+let categorySelect;
+let addQuoteBtn;
+let resetFormBtn;
+let notification;
 
 // Display a random quote
 function showRandomQuote() {
@@ -34,18 +34,18 @@ function showRandomQuote() {
     }
     
     if (filteredQuotes.length === 0) {
-        quoteDisplay.textContent = "No quotes available for this category. Add some!";
-        quoteAuthor.textContent = "";
-        quoteCategory.textContent = selectedCategory;
+        quoteDisplay.innerHTML = "No quotes available for this category. Add some!";
+        quoteAuthor.innerHTML = "";
+        quoteCategoryElement.innerHTML = selectedCategory;
         return;
     }
     
     const randomIndex = Math.floor(Math.random() * filteredQuotes.length);
     const randomQuote = filteredQuotes[randomIndex];
     
-    quoteDisplay.textContent = `"${randomQuote.text}"`;
-    quoteAuthor.textContent = randomQuote.author ? `- ${randomQuote.author}` : "";
-    quoteCategory.textContent = randomQuote.category.charAt(0).toUpperCase() + randomQuote.category.slice(1);
+    quoteDisplay.innerHTML = `"${randomQuote.text}"`;
+    quoteAuthor.innerHTML = randomQuote.author ? `- ${randomQuote.author}` : "";
+    quoteCategoryElement.innerHTML = randomQuote.category.charAt(0).toUpperCase() + randomQuote.category.slice(1);
 }
 
 // Add a new quote
@@ -87,6 +87,7 @@ function addQuote() {
 
 // Show notification
 function showNotification() {
+    notification.innerHTML = 'Quote added successfully!';
     notification.classList.add('show');
     setTimeout(() => {
         notification.classList.remove('show');
@@ -103,73 +104,100 @@ function resetForm() {
 // Create the form for adding quotes
 function createAddQuoteForm() {
     const formContainer = document.createElement('div');
+    formContainer.className = 'add-quote-form';
     
     const heading = document.createElement('h2');
-    heading.textContent = 'Add Your Own Quote';
+    heading.innerHTML = 'Add Your Own Quote';
+    formContainer.appendChild(heading);
     
-    const quoteInput = document.createElement('input');
-    quoteInput.type = 'text';
-    quoteInput.id = 'newQuoteText';
-    quoteInput.placeholder = 'Enter a new quote';
+    // Quote text input
+    const quoteGroup = document.createElement('div');
+    quoteGroup.className = 'form-group';
+    quoteGroup.innerHTML = `
+        <input type="text" id="newQuoteText" placeholder="Enter a new quote" />
+    `;
+    formContainer.appendChild(quoteGroup);
     
-    const authorInput = document.createElement('input');
-    authorInput.type = 'text';
-    authorInput.id = 'newQuoteAuthor';
-    authorInput.placeholder = 'Enter quote author (optional)';
+    // Author input
+    const authorGroup = document.createElement('div');
+    authorGroup.className = 'form-group';
+    authorGroup.innerHTML = `
+        <input type="text" id="newQuoteAuthor" placeholder="Enter quote author (optional)" />
+    `;
+    formContainer.appendChild(authorGroup);
     
-    const categoryInput = document.createElement('input');
-    categoryInput.type = 'text';
-    categoryInput.id = 'newQuoteCategory';
-    categoryInput.placeholder = 'Enter quote category';
+    // Category input
+    const categoryGroup = document.createElement('div');
+    categoryGroup.className = 'form-group';
+    categoryGroup.innerHTML = `
+        <input type="text" id="newQuoteCategory" placeholder="Enter quote category" />
+    `;
+    formContainer.appendChild(categoryGroup);
     
-    const addButton = document.createElement('button');
-    addButton.id = 'addQuoteBtn';
-    addButton.textContent = 'Add Quote';
-    
-    const resetButton = document.createElement('button');
-    resetButton.id = 'resetForm';
-    resetButton.textContent = 'Reset Form';
-    
+    // Buttons
     const buttonContainer = document.createElement('div');
     buttonContainer.className = 'form-buttons';
-    buttonContainer.appendChild(addButton);
-    buttonContainer.appendChild(resetButton);
-    
-    formContainer.appendChild(heading);
-    formContainer.appendChild(quoteInput);
-    formContainer.appendChild(authorInput);
-    formContainer.appendChild(categoryInput);
+    buttonContainer.innerHTML = `
+        <button id="addQuoteBtn">Add Quote</button>
+        <button id="resetForm">Reset Form</button>
+    `;
     formContainer.appendChild(buttonContainer);
-    
-    formContainer.className = 'add-quote-form';
     
     // Add to the container after the controls
     const container = document.querySelector('.container');
     const controls = document.querySelector('.controls');
     container.insertBefore(formContainer, controls.nextSibling);
     
-    // Add event listeners
-    addButton.addEventListener('click', addQuote);
-    resetButton.addEventListener('click', resetForm);
+    // Store references to buttons
+    addQuoteBtn = document.getElementById('addQuoteBtn');
+    resetFormBtn = document.getElementById('resetForm');
 }
 
 // Create notification element
 function createNotification() {
-    const notification = document.createElement('div');
-    notification.id = 'notification';
-    notification.className = 'notification';
-    notification.textContent = 'Quote added successfully!';
-    document.body.appendChild(notification);
+    const notificationElement = document.createElement('div');
+    notificationElement.id = 'notification';
+    notificationElement.className = 'notification';
+    notificationElement.innerHTML = 'Quote added successfully!';
+    document.body.appendChild(notificationElement);
+    notification = notificationElement;
+}
+
+// Create category dropdown options
+function populateCategoryDropdown() {
+    const categories = ['all', 'inspiration', 'motivation', 'success', 'life', 'wisdom'];
+    
+    categories.forEach(category => {
+        const option = document.createElement('option');
+        option.value = category;
+        option.innerHTML = category.charAt(0).toUpperCase() + category.slice(1);
+        categorySelect.appendChild(option);
+    });
+}
+
+// Initialize DOM elements
+function initializeDOMElements() {
+    quoteDisplay = document.getElementById('quoteText');
+    quoteAuthor = document.getElementById('quoteAuthor');
+    quoteCategoryElement = document.getElementById('quoteCategory');
+    newQuoteBtn = document.getElementById('newQuote');
+    categorySelect = document.getElementById('categorySelect');
 }
 
 // Initialize the application
 function init() {
+    // Initialize DOM elements
+    initializeDOMElements();
+    
     // Create the form and notification
     createAddQuoteForm();
     createNotification();
+    populateCategoryDropdown();
     
     // Add event listeners
     newQuoteBtn.addEventListener('click', showRandomQuote);
+    addQuoteBtn.addEventListener('click', addQuote);
+    resetFormBtn.addEventListener('click', resetForm);
     
     // Initialize with a random quote
     showRandomQuote();
