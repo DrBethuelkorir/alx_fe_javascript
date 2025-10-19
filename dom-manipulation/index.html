@@ -1,13 +1,12 @@
 <!DOCTYPE html>
-  <html lang="en">
-  <head>
+<html lang="en">
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dynamic Quote Generator</title>
-    <link rel="stylesheet" href="style.css">
-  </head>
-  <body>
-       <h1>Dynamic Quote Generator</h1>
+    </head>
+<body>
+    <h1>Dynamic Quote Generator</h1>
     <p class="subtitle">Get inspired with quotes from various categories</p>
     
     <div class="container">
@@ -47,9 +46,17 @@
                 <button id="resetForm">Reset Form</button>
             </div>
         </div>
+        
+        <div class="import-export-section">
+            <h2>Import & Export Quotes</h2>
+            <div class="import-export-buttons">
+                <button id="exportBtn">Export Quotes to JSON</button>
+                <div class="import-group">
+                    <label for="importFile" class="import-label">Import Quotes from JSON:</label>
+                    <input type="file" id="importFile" accept=".json" />
+                </div>
+            </div>
+        </div>
     </div>
     
     <div class="notification" id="notification">Quote added successfully!</div>
-    <script src="script.js"></script>
-  </body>
-  </html>
