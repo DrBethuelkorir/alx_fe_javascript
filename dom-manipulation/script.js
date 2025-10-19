@@ -17,12 +17,20 @@ const quotesGrid = document.getElementById('quotesGrid');
 const quoteCount = document.getElementById('quoteCount');
 const filterStatus = document.getElementById('filterStatus');
 
+// Server simulation variables
+const MOCK_API_URL = 'https://jsonplaceholder.typicode.com/posts';
+let lastSyncTime = null;
+let syncInterval = null;
+let pendingChanges = false;
+
 // Storage keys
 const STORAGE_KEYS = {
     QUOTES: 'dynamicQuoteGenerator_quotes',
     LAST_VIEWED: 'dynamicQuoteGenerator_lastViewed',
     USER_PREFERENCES: 'dynamicQuoteGenerator_preferences',
-    SELECTED_FILTER: 'dynamicQuoteGenerator_selectedFilter'
+    SELECTED_FILTER: 'dynamicQuoteGenerator_selectedFilter',
+    LAST_SYNC_TIME: 'dynamicQuoteGenerator_lastSyncTime',
+    PENDING_CHANGES: 'dynamicQuoteGenerator_pendingChanges'
 };
 
 // Load quotes from local storage
@@ -33,24 +41,50 @@ function loadQuotesFromStorage() {
     } else {
         // Load default quotes if no stored quotes
         quotes = [
-            { text: "The only way to do great work is to love what you do.", author: "Steve Jobs", category: "inspiration" },
-            { text: "Innovation distinguishes between a leader and a follower.", author: "Steve Jobs", category: "success" },
-            { text: "Your time is limited, so don't waste it living someone else's life.", author: "Steve Jobs", category: "life" },
-            { text: "The future belongs to those who believe in the beauty of their dreams.", author: "Eleanor Roosevelt", category: "motivation" },
-            { text: "It is during our darkest moments that we must focus to see the light.", author: "Aristotle", category: "wisdom" },
-            { text: "Whoever is happy will make others happy too.", author: "Anne Frank", category: "life" },
-            { text: "You must be the change you wish to see in the world.", author: "Mahatma Gandhi", category: "inspiration" },
-            { text: "The only impossible journey is the one you never begin.", author: "Tony Robbins", category: "motivation" },
-            { text: "The way to get started is to quit talking and begin doing.", author: "Walt Disney", category: "success" },
-            { text: "Life is what happens to you while you're busy making other plans.", author: "John Lennon", category: "life" }
+            { 
+                id: generateId(),
+                text: "The only way to do great work is to love what you do.", 
+                author: "Steve Jobs", 
+                category: "inspiration",
+                lastModified: new Date().toISOString(),
+                version: 1
+            },
+            { 
+                id: generateId(),
+                text: "Innovation distinguishes between a leader and a follower.", 
+                author: "Steve Jobs", 
+                category: "success",
+                lastModified: new Date().toISOString(),
+                version: 1
+            },
+            { 
+                id: generateId(),
+                text: "Your time is limited, so don't waste it living someone else's life.", 
+                author: "Steve Jobs", 
+                category: "life",
+                lastModified: new Date().toISOString(),
+                version: 1
+            }
         ];
         saveQuotes();
     }
+    
+    // Load sync state
+    lastSyncTime = localStorage.getItem(STORAGE_KEYS.LAST_SYNC_TIME);
+    pendingChanges = localStorage.getItem(STORAGE_KEYS.PENDING_CHANGES) === 'true';
+}
+
+// Generate unique ID for quotes
+function generateId() {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
 
 // Save quotes to local storage
 function saveQuotes() {
     localStorage.setItem(STORAGE_KEYS.QUOTES, JSON.stringify(quotes));
+    pendingChanges = true;
+    localStorage.setItem(STORAGE_KEYS.PENDING_CHANGES, 'true');
+    updateSyncStatus();
 }
 
 // Save last viewed quote to session storage
@@ -184,6 +218,10 @@ function displayQuotesGrid(quotesToDisplay) {
             <div class="quote-card-text">"${quote.text}"</div>
             <div class="quote-card-author">${quote.author ? '- ' + quote.author : ''}</div>
             <div class="quote-card-category">${quote.category}</div>
+            <div class="quote-card-meta">
+                <small>Modified: ${new Date(quote.lastModified).toLocaleDateString()}</small>
+                ${quote.conflict ? '<span class="conflict-badge">Conflict</span>' : ''}
+            </div>
         `;
         quotesGrid.appendChild(quoteCard);
     });
@@ -215,9 +253,12 @@ function addQuote() {
     }
     
     const newQuote = {
+        id: generateId(),
         text: newQuoteText,
         author: newQuoteAuthor || "Anonymous",
-        category: newQuoteCategory
+        category: newQuoteCategory,
+        lastModified: new Date().toISOString(),
+        version: 1
     };
     
     quotes.push(newQuote);
@@ -238,6 +279,9 @@ function addQuote() {
     
     // Show notification
     showNotification('Quote added successfully!');
+    
+    // Sync with server
+    syncWithServer();
 }
 
 // Export quotes to JSON file
@@ -272,17 +316,15 @@ function importFromJsonFile(event) {
                 throw new Error('Invalid format: Expected an array of quotes');
             }
             
-            // Validate each quote has required fields
-            for (let quote of importedQuotes) {
-                if (!quote.text || typeof quote.text !== 'string') {
-                    throw new Error('Invalid quote: Missing or invalid text field');
-                }
-                if (!quote.category || typeof quote.category !== 'string') {
-                    throw new Error('Invalid quote: Missing or invalid category field');
-                }
-            }
+            // Add IDs and metadata to imported quotes
+            const processedQuotes = importedQuotes.map(quote => ({
+                ...quote,
+                id: quote.id || generateId(),
+                lastModified: quote.lastModified || new Date().toISOString(),
+                version: quote.version || 1
+            }));
             
-            quotes.push(...importedQuotes);
+            quotes.push(...processedQuotes);
             saveQuotes();
             
             // Update categories dropdown
@@ -295,6 +337,9 @@ function importFromJsonFile(event) {
             event.target.value = '';
             
             showNotification(`Successfully imported ${importedQuotes.length} quotes!`);
+            
+            // Sync with server
+            syncWithServer();
             
         } catch (error) {
             console.error('Import error:', error);
@@ -311,10 +356,239 @@ function importFromJsonFile(event) {
     fileReader.readAsText(file);
 }
 
+// Simulate server sync
+async function syncWithServer() {
+    try {
+        showNotification('Syncing with server...');
+        
+        // Simulate server response with random data changes
+        const serverQuotes = await fetchServerQuotes();
+        
+        if (serverQuotes && serverQuotes.length > 0) {
+            const conflicts = mergeQuotes(serverQuotes);
+            
+            if (conflicts.length > 0) {
+                showConflictResolution(conflicts);
+            } else {
+                showNotification('Sync completed successfully!');
+            }
+        }
+        
+        // Update sync status
+        lastSyncTime = new Date().toISOString();
+        localStorage.setItem(STORAGE_KEYS.LAST_SYNC_TIME, lastSyncTime);
+        pendingChanges = false;
+        localStorage.setItem(STORAGE_KEYS.PENDING_CHANGES, 'false');
+        updateSyncStatus();
+        
+        // Refresh display
+        populateCategories();
+        filterQuotes();
+        
+    } catch (error) {
+        console.error('Sync error:', error);
+        showNotification('Sync failed. Will retry later.', 'error');
+    }
+}
+
+// Fetch quotes from mock server
+async function fetchServerQuotes() {
+    // Simulate API call with random delay
+    await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
+    
+    // Simulate server response with some changes
+    const serverQuotes = [...quotes.map(quote => ({...quote}))];
+    
+    // Randomly modify some quotes to simulate server changes
+    if (Math.random() > 0.5 && serverQuotes.length > 0) {
+        const randomIndex = Math.floor(Math.random() * serverQuotes.length);
+        serverQuotes[randomIndex] = {
+            ...serverQuotes[randomIndex],
+            text: serverQuotes[randomIndex].text + " (Server Update)",
+            lastModified: new Date().toISOString(),
+            version: serverQuotes[randomIndex].version + 1
+        };
+    }
+    
+    // Occasionally add a new quote from server
+    if (Math.random() > 0.7) {
+        serverQuotes.push({
+            id: generateId(),
+            text: "This quote was added by the server during sync.",
+            author: "System",
+            category: "system",
+            lastModified: new Date().toISOString(),
+            version: 1
+        });
+    }
+    
+    return serverQuotes;
+}
+
+// Merge server quotes with local quotes
+function mergeQuotes(serverQuotes) {
+    const conflicts = [];
+    const mergedQuotes = [];
+    const quoteMap = new Map();
+    
+    // Add all server quotes to map
+    serverQuotes.forEach(quote => {
+        quoteMap.set(quote.id, { ...quote, source: 'server' });
+    });
+    
+    // Merge with local quotes
+    quotes.forEach(localQuote => {
+        const serverQuote = quoteMap.get(localQuote.id);
+        
+        if (serverQuote) {
+            // Quote exists in both local and server
+            const localTime = new Date(localQuote.lastModified);
+            const serverTime = new Date(serverQuote.lastModified);
+            
+            if (serverTime > localTime && serverQuote.version > localQuote.version) {
+                // Server version is newer - use server data
+                mergedQuotes.push(serverQuote);
+                
+                if (localQuote.text !== serverQuote.text) {
+                    conflicts.push({
+                        id: localQuote.id,
+                        local: localQuote,
+                        server: serverQuote,
+                        resolved: false
+                    });
+                }
+            } else {
+                // Local version is newer or same - keep local
+                mergedQuotes.push(localQuote);
+            }
+            
+            quoteMap.delete(localQuote.id);
+        } else {
+            // Quote only exists locally
+            mergedQuotes.push(localQuote);
+        }
+    });
+    
+    // Add quotes that only exist on server
+    quoteMap.forEach(serverQuote => {
+        mergedQuotes.push(serverQuote);
+    });
+    
+    // Update quotes array
+    quotes = mergedQuotes;
+    saveQuotes();
+    
+    return conflicts;
+}
+
+// Show conflict resolution UI
+function showConflictResolution(conflicts) {
+    const conflictModal = document.createElement('div');
+    conflictModal.className = 'conflict-modal';
+    conflictModal.innerHTML = `
+        <div class="conflict-modal-content">
+            <h3>Data Conflicts Detected</h3>
+            <p>We found ${conflicts.length} conflict(s) during sync. Please review and resolve:</p>
+            <div class="conflicts-list">
+                ${conflicts.map((conflict, index) => `
+                    <div class="conflict-item">
+                        <h4>Conflict ${index + 1}</h4>
+                        <div class="conflict-options">
+                            <div class="option">
+                                <label>
+                                    <input type="radio" name="resolve-${conflict.id}" value="server" checked>
+                                    <strong>Server Version:</strong> "${conflict.server.text}"
+                                </label>
+                            </div>
+                            <div class="option">
+                                <label>
+                                    <input type="radio" name="resolve-${conflict.id}" value="local">
+                                    <strong>Local Version:</strong> "${conflict.local.text}"
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+            <div class="conflict-actions">
+                <button id="resolveConflicts" class="btn-primary">Resolve Conflicts</button>
+                <button id="ignoreConflicts" class="btn-secondary">Ignore for Now</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(conflictModal);
+    
+    // Add event listeners
+    document.getElementById('resolveConflicts').addEventListener('click', () => {
+        resolveConflicts(conflicts);
+        document.body.removeChild(conflictModal);
+    });
+    
+    document.getElementById('ignoreConflicts').addEventListener('click', () => {
+        document.body.removeChild(conflictModal);
+        showNotification('Conflicts ignored. They will be flagged for later resolution.');
+    });
+}
+
+// Resolve conflicts based on user selection
+function resolveConflicts(conflicts) {
+    conflicts.forEach(conflict => {
+        const selectedOption = document.querySelector(`input[name="resolve-${conflict.id}"]:checked`);
+        
+        if (selectedOption) {
+            const selectedVersion = selectedOption.value;
+            const resolvedQuote = selectedVersion === 'server' ? conflict.server : conflict.local;
+            
+            // Update the quote in the array
+            const index = quotes.findIndex(q => q.id === conflict.id);
+            if (index !== -1) {
+                quotes[index] = {
+                    ...resolvedQuote,
+                    lastModified: new Date().toISOString(),
+                    version: Math.max(conflict.local.version, conflict.server.version) + 1,
+                    conflict: false
+                };
+            }
+        }
+    });
+    
+    saveQuotes();
+    populateCategories();
+    filterQuotes();
+    showNotification('Conflicts resolved successfully!');
+}
+
+// Update sync status display
+function updateSyncStatus() {
+    const syncStatus = document.getElementById('syncStatus');
+    if (syncStatus) {
+        syncStatus.innerHTML = `
+            <span class="sync-indicator ${pendingChanges ? 'pending' : 'synced'}">
+                ${pendingChanges ? '⏳' : '✅'} 
+                ${pendingChanges ? 'Changes pending sync' : 'Synced'}
+            </span>
+            ${lastSyncTime ? `<small>Last sync: ${new Date(lastSyncTime).toLocaleString()}</small>` : ''}
+        `;
+    }
+}
+
+// Create sync status element
+function createSyncStatus() {
+    const syncStatus = document.createElement('div');
+    syncStatus.id = 'syncStatus';
+    syncStatus.className = 'sync-status';
+    
+    const container = document.querySelector('.container');
+    container.insertBefore(syncStatus, container.firstChild);
+    
+    updateSyncStatus();
+}
+
 // Show notification
-function showNotification(message) {
+function showNotification(message, type = 'success') {
     notification.textContent = message;
-    notification.classList.add('show');
+    notification.className = `notification show ${type}`;
     setTimeout(() => {
         notification.classList.remove('show');
     }, 3000);
@@ -351,6 +625,9 @@ function init() {
     // Load user preferences
     loadUserPreferences();
     
+    // Create sync status
+    createSyncStatus();
+    
     // Add event listeners
     newQuoteBtn.addEventListener('click', showRandomQuote);
     addQuoteBtn.addEventListener('click', addQuote);
@@ -359,6 +636,13 @@ function init() {
     importFile.addEventListener('change', importFromJsonFile);
     categoryFilter.addEventListener('change', filterQuotes);
     
+    // Manual sync button
+    const manualSyncBtn = document.createElement('button');
+    manualSyncBtn.id = 'manualSync';
+    manualSyncBtn.textContent = '🔄 Sync Now';
+    manualSyncBtn.addEventListener('click', syncWithServer);
+    document.querySelector('.import-export-buttons').appendChild(manualSyncBtn);
+    
     // Show last viewed quote or random quote
     if (!showLastViewedQuote()) {
         showRandomQuote();
@@ -366,6 +650,12 @@ function init() {
     
     // Display all quotes initially
     filterQuotes();
+    
+    // Start periodic sync (every 30 seconds)
+    syncInterval = setInterval(syncWithServer, 30000);
+    
+    // Initial sync
+    setTimeout(syncWithServer, 2000);
 }
 
 // Initialize when DOM is loaded
