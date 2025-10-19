@@ -22,6 +22,7 @@ const MOCK_API_URL = 'https://jsonplaceholder.typicode.com/posts';
 let lastSyncTime = null;
 let syncInterval = null;
 let pendingChanges = false;
+let isSyncing = false;
 
 // Storage keys
 const STORAGE_KEYS = {
@@ -30,7 +31,8 @@ const STORAGE_KEYS = {
     USER_PREFERENCES: 'dynamicQuoteGenerator_preferences',
     SELECTED_FILTER: 'dynamicQuoteGenerator_selectedFilter',
     LAST_SYNC_TIME: 'dynamicQuoteGenerator_lastSyncTime',
-    PENDING_CHANGES: 'dynamicQuoteGenerator_pendingChanges'
+    PENDING_CHANGES: 'dynamicQuoteGenerator_pendingChanges',
+    SYNC_HISTORY: 'dynamicQuoteGenerator_syncHistory'
 };
 
 // Load quotes from local storage
@@ -281,7 +283,7 @@ function addQuote() {
     showNotification('Quote added successfully!');
     
     // Sync with server
-    syncWithServer();
+    syncQuotes();
 }
 
 // Export quotes to JSON file
@@ -339,7 +341,7 @@ function importFromJsonFile(event) {
             showNotification(`Successfully imported ${importedQuotes.length} quotes!`);
             
             // Sync with server
-            syncWithServer();
+            syncQuotes();
             
         } catch (error) {
             console.error('Import error:', error);
@@ -449,7 +451,8 @@ async function sendQuotesToServer() {
             body: JSON.stringify({
                 quotes: quotesToSend,
                 clientId: 'quote-generator-' + generateId(),
-                syncType: 'full-sync'
+                syncType: 'full-sync',
+                timestamp: new Date().toISOString()
             })
         });
         
@@ -481,37 +484,76 @@ async function sendQuotesToServer() {
     }
 }
 
-// Fetch quotes from mock server (alternative implementation)
-async function fetchServerQuotes() {
-    return await fetchQuotesFromServer();
-}
-
-// Two-way sync with server
-async function syncWithServer() {
+// Main sync function - handles complete synchronization process
+async function syncQuotes() {
+    if (isSyncing) {
+        showNotification('Sync already in progress...', 'info');
+        return;
+    }
+    
     try {
-        showNotification('Starting synchronization with server...');
+        isSyncing = true;
+        updateSyncStatus();
         
-        // Step 1: Send local changes to server using POST
-        if (pendingChanges) {
+        showNotification('Starting quote synchronization...', 'info');
+        
+        // Record sync start time
+        const syncStartTime = new Date().toISOString();
+        
+        // Step 1: Check if we have pending changes to send
+        const hasPendingChanges = pendingChanges || quotes.some(quote => !quote.synced);
+        
+        if (hasPendingChanges) {
+            // Send local changes to server
             const sendResult = await sendQuotesToServer();
+            
             if (!sendResult.success) {
-                throw new Error('Failed to send quotes to server');
+                throw new Error(`Failed to send quotes: ${sendResult.error}`);
             }
+            
+            // Mark quotes as synced
+            quotes.forEach(quote => {
+                quote.synced = true;
+            });
+            saveQuotes();
         }
         
-        // Step 2: Fetch latest quotes from server using GET
+        // Step 2: Fetch latest quotes from server
         const serverQuotes = await fetchQuotesFromServer();
         
-        if (serverQuotes && serverQuotes.length > 0) {
-            const conflicts = mergeQuotes(serverQuotes);
+        if (serverQuotes) {
+            // Step 3: Merge server quotes with local quotes
+            const conflicts = await mergeQuotesWithServer(serverQuotes);
             
+            // Step 4: Handle conflicts if any
             if (conflicts.length > 0) {
-                showConflictResolution(conflicts);
+                await handleSyncConflicts(conflicts);
             } else {
-                showNotification('Two-way sync completed successfully!');
+                showNotification('Quote synchronization completed successfully!');
             }
+            
+            // Record successful sync
+            recordSyncHistory({
+                timestamp: syncStartTime,
+                type: 'full_sync',
+                quotesSent: hasPendingChanges ? quotes.length : 0,
+                quotesReceived: serverQuotes.length,
+                conflicts: conflicts.length,
+                status: 'success'
+            });
+            
         } else {
-            showNotification('Sync completed - no changes from server');
+            showNotification('Sync completed - no updates from server', 'info');
+            
+            // Record sync with no updates
+            recordSyncHistory({
+                timestamp: syncStartTime,
+                type: 'send_only',
+                quotesSent: hasPendingChanges ? quotes.length : 0,
+                quotesReceived: 0,
+                conflicts: 0,
+                status: 'success'
+            });
         }
         
         // Update sync status
@@ -519,27 +561,41 @@ async function syncWithServer() {
         localStorage.setItem(STORAGE_KEYS.LAST_SYNC_TIME, lastSyncTime);
         pendingChanges = false;
         localStorage.setItem(STORAGE_KEYS.PENDING_CHANGES, 'false');
+        
+    } catch (error) {
+        console.error('Sync error:', error);
+        showNotification(`Sync failed: ${error.message}`, 'error');
+        
+        // Record failed sync
+        recordSyncHistory({
+            timestamp: new Date().toISOString(),
+            type: 'failed',
+            quotesSent: 0,
+            quotesReceived: 0,
+            conflicts: 0,
+            status: 'failed',
+            error: error.message
+        });
+        
+    } finally {
+        isSyncing = false;
         updateSyncStatus();
         
         // Refresh display
         populateCategories();
         filterQuotes();
-        
-    } catch (error) {
-        console.error('Sync error:', error);
-        showNotification('Sync failed. Will retry later.', 'error');
     }
 }
 
-// Merge server quotes with local quotes
-function mergeQuotes(serverQuotes) {
+// Enhanced merge function for quotes
+async function mergeQuotesWithServer(serverQuotes) {
     const conflicts = [];
     const mergedQuotes = [];
     const quoteMap = new Map();
     
     // Add all server quotes to map
     serverQuotes.forEach(quote => {
-        quoteMap.set(quote.id, { ...quote, source: 'server' });
+        quoteMap.set(quote.id, { ...quote, source: 'server', synced: true });
     });
     
     // Merge with local quotes
@@ -551,21 +607,40 @@ function mergeQuotes(serverQuotes) {
             const localTime = new Date(localQuote.lastModified);
             const serverTime = new Date(serverQuote.lastModified);
             
-            if (serverTime > localTime && serverQuote.version > localQuote.version) {
+            // Check if there's a conflict (different content but similar timestamps)
+            const hasConflict = (
+                (localQuote.text !== serverQuote.text || localQuote.author !== serverQuote.author) &&
+                Math.abs(serverTime - localTime) < 60000 // Within 1 minute
+            );
+            
+            if (serverTime > localTime && serverQuote.version >= localQuote.version) {
                 // Server version is newer - use server data
                 mergedQuotes.push(serverQuote);
                 
-                if (localQuote.text !== serverQuote.text || localQuote.author !== serverQuote.author) {
+                if (hasConflict) {
                     conflicts.push({
                         id: localQuote.id,
                         local: localQuote,
                         server: serverQuote,
-                        resolved: false
+                        resolved: false,
+                        type: 'version_conflict'
                     });
                 }
+            } else if (localTime > serverTime && localQuote.version >= serverQuote.version) {
+                // Local version is newer - keep local
+                mergedQuotes.push({ ...localQuote, synced: true });
             } else {
-                // Local version is newer or same - keep local
+                // Equal timestamps/versions but different content - conflict
                 mergedQuotes.push(localQuote);
+                if (hasConflict) {
+                    conflicts.push({
+                        id: localQuote.id,
+                        local: localQuote,
+                        server: serverQuote,
+                        resolved: false,
+                        type: 'content_conflict'
+                    });
+                }
             }
             
             quoteMap.delete(localQuote.id);
@@ -587,62 +662,90 @@ function mergeQuotes(serverQuotes) {
     return conflicts;
 }
 
-// Show conflict resolution UI
-function showConflictResolution(conflicts) {
-    const conflictModal = document.createElement('div');
-    conflictModal.className = 'conflict-modal';
-    conflictModal.innerHTML = `
-        <div class="conflict-modal-content">
-            <h3>Data Conflicts Detected</h3>
-            <p>We found ${conflicts.length} conflict(s) during sync. Please review and resolve:</p>
-            <div class="conflicts-list">
-                ${conflicts.map((conflict, index) => `
-                    <div class="conflict-item">
-                        <h4>Conflict ${index + 1}</h4>
-                        <div class="conflict-options">
-                            <div class="option">
-                                <label>
-                                    <input type="radio" name="resolve-${conflict.id}" value="server" checked>
-                                    <strong>Server Version:</strong> "${conflict.server.text}"
-                                    ${conflict.server.author ? `<br><em>Author: ${conflict.server.author}</em>` : ''}
-                                    <br><small>Version: ${conflict.server.version} | ${new Date(conflict.server.lastModified).toLocaleString()}</small>
-                                </label>
+// Handle sync conflicts
+async function handleSyncConflicts(conflicts) {
+    return new Promise((resolve) => {
+        if (conflicts.length === 0) {
+            resolve();
+            return;
+        }
+        
+        const conflictModal = document.createElement('div');
+        conflictModal.className = 'conflict-modal';
+        conflictModal.innerHTML = `
+            <div class="conflict-modal-content">
+                <h3>Synchronization Conflicts</h3>
+                <p>Found ${conflicts.length} conflict(s) during sync. Please resolve:</p>
+                <div class="conflicts-list">
+                    ${conflicts.map((conflict, index) => `
+                        <div class="conflict-item">
+                            <h4>Conflict ${index + 1} (${conflict.type})</h4>
+                            <div class="conflict-comparison">
+                                <div class="version local-version">
+                                    <h5>Local Version</h5>
+                                    <p>"${conflict.local.text}"</p>
+                                    <small>Author: ${conflict.local.author || 'Unknown'}</small>
+                                    <br>
+                                    <small>Modified: ${new Date(conflict.local.lastModified).toLocaleString()}</small>
+                                </div>
+                                <div class="version server-version">
+                                    <h5>Server Version</h5>
+                                    <p>"${conflict.server.text}"</p>
+                                    <small>Author: ${conflict.server.author || 'Unknown'}</small>
+                                    <br>
+                                    <small>Modified: ${new Date(conflict.server.lastModified).toLocaleString()}</small>
+                                </div>
                             </div>
-                            <div class="option">
+                            <div class="conflict-options">
                                 <label>
-                                    <input type="radio" name="resolve-${conflict.id}" value="local">
-                                    <strong>Local Version:</strong> "${conflict.local.text}"
-                                    ${conflict.local.author ? `<br><em>Author: ${conflict.local.author}</em>` : ''}
-                                    <br><small>Version: ${conflict.local.version} | ${new Date(conflict.local.lastModified).toLocaleString()}</small>
+                                    <input type="radio" name="resolve-${conflict.id}" value="local" ${index === 0 ? 'checked' : ''}>
+                                    Keep Local Version
+                                </label>
+                                <label>
+                                    <input type="radio" name="resolve-${conflict.id}" value="server">
+                                    Use Server Version
+                                </label>
+                                <label>
+                                    <input type="radio" name="resolve-${conflict.id}" value="merge">
+                                    Merge Both
                                 </label>
                             </div>
                         </div>
-                    </div>
-                `).join('')}
+                    `).join('')}
+                </div>
+                <div class="conflict-actions">
+                    <button id="resolveAllConflicts" class="btn-primary">Resolve All</button>
+                    <button id="autoResolveConflicts" class="btn-secondary">Auto-Resolve (Use Server)</button>
+                    <button id="cancelSync" class="btn-cancel">Cancel Sync</button>
+                </div>
             </div>
-            <div class="conflict-actions">
-                <button id="resolveConflicts" class="btn-primary">Resolve Conflicts</button>
-                <button id="ignoreConflicts" class="btn-secondary">Ignore for Now</button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(conflictModal);
-    
-    // Add event listeners
-    document.getElementById('resolveConflicts').addEventListener('click', () => {
-        resolveConflicts(conflicts);
-        document.body.removeChild(conflictModal);
-    });
-    
-    document.getElementById('ignoreConflicts').addEventListener('click', () => {
-        document.body.removeChild(conflictModal);
-        showNotification('Conflicts ignored. They will be flagged for later resolution.');
+        `;
+        
+        document.body.appendChild(conflictModal);
+        
+        // Event listeners for conflict resolution
+        document.getElementById('resolveAllConflicts').addEventListener('click', () => {
+            resolveConflictsManually(conflicts);
+            document.body.removeChild(conflictModal);
+            resolve();
+        });
+        
+        document.getElementById('autoResolveConflicts').addEventListener('click', () => {
+            resolveConflictsAutomatically(conflicts);
+            document.body.removeChild(conflictModal);
+            resolve();
+        });
+        
+        document.getElementById('cancelSync').addEventListener('click', () => {
+            document.body.removeChild(conflictModal);
+            showNotification('Sync cancelled by user', 'info');
+            resolve();
+        });
     });
 }
 
-// Resolve conflicts based on user selection
-function resolveConflicts(conflicts) {
+// Resolve conflicts manually based on user selection
+function resolveConflictsManually(conflicts) {
     let resolvedCount = 0;
     
     conflicts.forEach(conflict => {
@@ -650,7 +753,19 @@ function resolveConflicts(conflicts) {
         
         if (selectedOption) {
             const selectedVersion = selectedOption.value;
-            const resolvedQuote = selectedVersion === 'server' ? conflict.server : conflict.local;
+            let resolvedQuote;
+            
+            if (selectedVersion === 'merge') {
+                // Merge both versions
+                resolvedQuote = {
+                    ...conflict.local,
+                    text: `${conflict.local.text} [Merged: ${conflict.server.text.substring(0, 30)}...]`,
+                    lastModified: new Date().toISOString(),
+                    version: Math.max(conflict.local.version, conflict.server.version) + 1
+                };
+            } else {
+                resolvedQuote = selectedVersion === 'server' ? conflict.server : conflict.local;
+            }
             
             // Update the quote in the array
             const index = quotes.findIndex(q => q.id === conflict.id);
@@ -659,7 +774,8 @@ function resolveConflicts(conflicts) {
                     ...resolvedQuote,
                     lastModified: new Date().toISOString(),
                     version: Math.max(conflict.local.version, conflict.server.version) + 1,
-                    conflict: false
+                    conflict: false,
+                    synced: true
                 };
                 resolvedCount++;
             }
@@ -667,9 +783,61 @@ function resolveConflicts(conflicts) {
     });
     
     saveQuotes();
-    populateCategories();
-    filterQuotes();
-    showNotification(`Resolved ${resolvedCount} conflict(s) successfully!`);
+    showNotification(`Manually resolved ${resolvedCount} conflict(s)!`);
+}
+
+// Automatically resolve conflicts (server wins)
+function resolveConflictsAutomatically(conflicts) {
+    conflicts.forEach(conflict => {
+        const index = quotes.findIndex(q => q.id === conflict.id);
+        if (index !== -1) {
+            quotes[index] = {
+                ...conflict.server,
+                lastModified: new Date().toISOString(),
+                version: Math.max(conflict.local.version, conflict.server.version) + 1,
+                conflict: false,
+                synced: true
+            };
+        }
+    });
+    
+    saveQuotes();
+    showNotification(`Automatically resolved ${conflicts.length} conflict(s) using server versions.`);
+}
+
+// Record sync history
+function recordSyncHistory(syncData) {
+    let syncHistory = JSON.parse(localStorage.getItem(STORAGE_KEYS.SYNC_HISTORY) || '[]');
+    
+    syncHistory.unshift({
+        ...syncData,
+        id: generateId()
+    });
+    
+    // Keep only last 10 sync records
+    syncHistory = syncHistory.slice(0, 10);
+    
+    localStorage.setItem(STORAGE_KEYS.SYNC_HISTORY, JSON.stringify(syncHistory));
+}
+
+// Fetch quotes from mock server (alternative implementation)
+async function fetchServerQuotes() {
+    return await fetchQuotesFromServer();
+}
+
+// Simulate server sync (legacy function - now uses syncQuotes)
+async function syncWithServer() {
+    return await syncQuotes();
+}
+
+// Show conflict resolution UI (legacy function)
+function showConflictResolution(conflicts) {
+    handleSyncConflicts(conflicts);
+}
+
+// Resolve conflicts based on user selection (legacy function)
+function resolveConflicts(conflicts) {
+    resolveConflictsManually(conflicts);
 }
 
 // Update sync status display
@@ -677,9 +845,9 @@ function updateSyncStatus() {
     const syncStatus = document.getElementById('syncStatus');
     if (syncStatus) {
         syncStatus.innerHTML = `
-            <span class="sync-indicator ${pendingChanges ? 'pending' : 'synced'}">
-                ${pendingChanges ? '⏳' : '✅'} 
-                ${pendingChanges ? 'Changes pending sync' : 'Synced'}
+            <span class="sync-indicator ${isSyncing ? 'syncing' : pendingChanges ? 'pending' : 'synced'}">
+                ${isSyncing ? '🔄' : pendingChanges ? '⏳' : '✅'} 
+                ${isSyncing ? 'Syncing...' : pendingChanges ? 'Changes pending sync' : 'Synced'}
             </span>
             ${lastSyncTime ? `<small>Last sync: ${new Date(lastSyncTime).toLocaleString()}</small>` : ''}
         `;
@@ -753,7 +921,7 @@ function init() {
     const manualSyncBtn = document.createElement('button');
     manualSyncBtn.id = 'manualSync';
     manualSyncBtn.textContent = '🔄 Sync Now';
-    manualSyncBtn.addEventListener('click', syncWithServer);
+    manualSyncBtn.addEventListener('click', syncQuotes);
     document.querySelector('.import-export-buttons').appendChild(manualSyncBtn);
     
     // Show last viewed quote or random quote
@@ -765,10 +933,10 @@ function init() {
     filterQuotes();
     
     // Start periodic sync (every 30 seconds)
-    syncInterval = setInterval(syncWithServer, 30000);
+    syncInterval = setInterval(syncQuotes, 30000);
     
     // Initial sync
-    setTimeout(syncWithServer, 2000);
+    setTimeout(syncQuotes, 2000);
 }
 
 // Initialize when DOM is loaded
