@@ -356,47 +356,60 @@ function importFromJsonFile(event) {
     fileReader.readAsText(file);
 }
 
-// Fetch quotes from mock server
+// Fetch quotes from mock server using GET method
 async function fetchQuotesFromServer() {
     try {
         showNotification('Fetching quotes from server...');
         
-        // Simulate API call with random delay
-        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
+        // Simulate API call with fetch GET method
+        const response = await fetch(MOCK_API_URL, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': 'mock-api-key-12345',
+                'User-Agent': 'DynamicQuoteGenerator/1.0'
+            }
+        });
         
-        // Create server response with simulated changes
+        // Simulate network delay
+        await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 1200));
+        
+        if (!response.ok) {
+            throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+        }
+        
+        // Create server response with simulated changes based on mock data
+        const mockData = await response.json();
         const serverQuotes = [...quotes.map(quote => ({...quote}))];
         
-        // Randomly modify some quotes to simulate server changes
-        if (Math.random() > 0.5 && serverQuotes.length > 0) {
+        // Use mock data to create realistic server responses
+        if (mockData && mockData.length > 0 && serverQuotes.length > 0) {
+            // Randomly modify some quotes based on server data
             const randomIndex = Math.floor(Math.random() * serverQuotes.length);
+            const mockQuote = mockData[Math.floor(Math.random() * Math.min(5, mockData.length))];
+            
             serverQuotes[randomIndex] = {
                 ...serverQuotes[randomIndex],
-                text: serverQuotes[randomIndex].text + " (Server Update)",
+                text: `${serverQuotes[randomIndex].text} (Server: ${mockQuote.title.substring(0, 20)}...)`,
                 lastModified: new Date().toISOString(),
                 version: serverQuotes[randomIndex].version + 1,
                 source: 'server'
             };
         }
         
-        // Occasionally add a new quote from server
-        if (Math.random() > 0.7) {
+        // Occasionally add a new quote from server using mock data
+        if (Math.random() > 0.7 && mockData && mockData.length > 0) {
+            const mockItem = mockData[Math.floor(Math.random() * Math.min(3, mockData.length))];
             const newServerQuote = {
                 id: generateId(),
-                text: "This quote was added by the server during sync.",
+                text: `Server added: ${mockItem.body.substring(0, 50)}...`,
                 author: "System",
-                category: "system",
+                category: "wisdom",
                 lastModified: new Date().toISOString(),
                 version: 1,
                 source: 'server'
             };
             serverQuotes.push(newServerQuote);
-        }
-        
-        // Occasionally remove a quote to simulate server deletion
-        if (Math.random() > 0.8 && serverQuotes.length > 2) {
-            const removeIndex = Math.floor(Math.random() * serverQuotes.length);
-            serverQuotes.splice(removeIndex, 1);
         }
         
         showNotification('Successfully fetched quotes from server!');
@@ -409,17 +422,84 @@ async function fetchQuotesFromServer() {
     }
 }
 
+// Send quotes to server using POST method
+async function sendQuotesToServer() {
+    try {
+        showNotification('Sending quotes to server...');
+        
+        // Prepare data for server
+        const quotesToSend = quotes.map(quote => ({
+            id: quote.id,
+            text: quote.text,
+            author: quote.author,
+            category: quote.category,
+            version: quote.version,
+            lastModified: quote.lastModified
+        }));
+        
+        // Simulate POST request to server
+        const response = await fetch(MOCK_API_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': 'mock-api-key-12345',
+                'User-Agent': 'DynamicQuoteGenerator/1.0',
+                'X-Sync-Timestamp': new Date().toISOString()
+            },
+            body: JSON.stringify({
+                quotes: quotesToSend,
+                clientId: 'quote-generator-' + generateId(),
+                syncType: 'full-sync'
+            })
+        });
+        
+        // Simulate network delay for POST request
+        await new Promise(resolve => setTimeout(resolve, 600 + Math.random() * 1000));
+        
+        if (!response.ok) {
+            throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+        }
+        
+        const serverResponse = await response.json();
+        
+        // Simulate server processing and response
+        showNotification('Quotes successfully sent to server!');
+        return {
+            success: true,
+            receivedQuotes: quotesToSend.length,
+            serverTimestamp: new Date().toISOString(),
+            message: 'Sync completed successfully'
+        };
+        
+    } catch (error) {
+        console.error('Error sending quotes to server:', error);
+        showNotification('Failed to send quotes to server', 'error');
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
 // Fetch quotes from mock server (alternative implementation)
 async function fetchServerQuotes() {
     return await fetchQuotesFromServer();
 }
 
-// Simulate server sync
+// Two-way sync with server
 async function syncWithServer() {
     try {
-        showNotification('Syncing with server...');
+        showNotification('Starting synchronization with server...');
         
-        // Fetch quotes from server
+        // Step 1: Send local changes to server using POST
+        if (pendingChanges) {
+            const sendResult = await sendQuotesToServer();
+            if (!sendResult.success) {
+                throw new Error('Failed to send quotes to server');
+            }
+        }
+        
+        // Step 2: Fetch latest quotes from server using GET
         const serverQuotes = await fetchQuotesFromServer();
         
         if (serverQuotes && serverQuotes.length > 0) {
@@ -428,8 +508,10 @@ async function syncWithServer() {
             if (conflicts.length > 0) {
                 showConflictResolution(conflicts);
             } else {
-                showNotification('Sync completed successfully!');
+                showNotification('Two-way sync completed successfully!');
             }
+        } else {
+            showNotification('Sync completed - no changes from server');
         }
         
         // Update sync status
@@ -523,6 +605,7 @@ function showConflictResolution(conflicts) {
                                     <input type="radio" name="resolve-${conflict.id}" value="server" checked>
                                     <strong>Server Version:</strong> "${conflict.server.text}"
                                     ${conflict.server.author ? `<br><em>Author: ${conflict.server.author}</em>` : ''}
+                                    <br><small>Version: ${conflict.server.version} | ${new Date(conflict.server.lastModified).toLocaleString()}</small>
                                 </label>
                             </div>
                             <div class="option">
@@ -530,6 +613,7 @@ function showConflictResolution(conflicts) {
                                     <input type="radio" name="resolve-${conflict.id}" value="local">
                                     <strong>Local Version:</strong> "${conflict.local.text}"
                                     ${conflict.local.author ? `<br><em>Author: ${conflict.local.author}</em>` : ''}
+                                    <br><small>Version: ${conflict.local.version} | ${new Date(conflict.local.lastModified).toLocaleString()}</small>
                                 </label>
                             </div>
                         </div>
