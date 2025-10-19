@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dynamic Quote Generator</title>
-    </head>
+    <link rel="stylesheet" href="style.css">
+</head>
 <body>
     <h1>Dynamic Quote Generator</h1>
     <p class="subtitle">Get inspired with quotes from various categories</p>
@@ -20,14 +21,29 @@
             <div class="category-selector">
                 <select id="categorySelect">
                     <option value="all">All Categories</option>
-                    <option value="inspiration">Inspiration</option>
-                    <option value="motivation">Motivation</option>
-                    <option value="success">Success</option>
-                    <option value="life">Life</option>
-                    <option value="wisdom">Wisdom</option>
                 </select>
             </div>
             <button id="newQuote">Show New Quote</button>
+        </div>
+        
+        <div class="filter-section">
+            <h2>Filter Quotes</h2>
+            <div class="filter-controls">
+                <div class="filter-group">
+                    <label for="categoryFilter">Filter by Category:</label>
+                    <select id="categoryFilter">
+                        <option value="all">All Categories</option>
+                    </select>
+                </div>
+                <div class="filter-stats">
+                    <span id="quoteCount">Total Quotes: 0</span>
+                    <span id="filterStatus">Showing: All quotes</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="quotes-grid" id="quotesGrid">
+            <!-- Quotes will be dynamically populated here -->
         </div>
         
         <div class="add-quote-form">
@@ -60,3 +76,7 @@
     </div>
     
     <div class="notification" id="notification">Quote added successfully!</div>
+
+    <script src="script.js"></script>
+</body>
+</html>
