@@ -414,7 +414,7 @@ async function fetchQuotesFromServer() {
             serverQuotes.push(newServerQuote);
         }
         
-        showNotification('Successfully fetched quotes from server!');
+        showNotification('Quotes synced with server!');
         return serverQuotes;
         
     } catch (error) {
@@ -466,7 +466,7 @@ async function sendQuotesToServer() {
         const serverResponse = await response.json();
         
         // Simulate server processing and response
-        showNotification('Quotes successfully sent to server!');
+        showNotification('Quotes synced with server!');
         return {
             success: true,
             receivedQuotes: quotesToSend.length,
@@ -529,7 +529,7 @@ async function syncQuotes() {
             if (conflicts.length > 0) {
                 await handleSyncConflicts(conflicts);
             } else {
-                showNotification('Quote synchronization completed successfully!');
+                showNotification('Quotes synced with server!');
             }
             
             // Record successful sync
