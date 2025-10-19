@@ -356,13 +356,71 @@ function importFromJsonFile(event) {
     fileReader.readAsText(file);
 }
 
+// Fetch quotes from mock server
+async function fetchQuotesFromServer() {
+    try {
+        showNotification('Fetching quotes from server...');
+        
+        // Simulate API call with random delay
+        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
+        
+        // Create server response with simulated changes
+        const serverQuotes = [...quotes.map(quote => ({...quote}))];
+        
+        // Randomly modify some quotes to simulate server changes
+        if (Math.random() > 0.5 && serverQuotes.length > 0) {
+            const randomIndex = Math.floor(Math.random() * serverQuotes.length);
+            serverQuotes[randomIndex] = {
+                ...serverQuotes[randomIndex],
+                text: serverQuotes[randomIndex].text + " (Server Update)",
+                lastModified: new Date().toISOString(),
+                version: serverQuotes[randomIndex].version + 1,
+                source: 'server'
+            };
+        }
+        
+        // Occasionally add a new quote from server
+        if (Math.random() > 0.7) {
+            const newServerQuote = {
+                id: generateId(),
+                text: "This quote was added by the server during sync.",
+                author: "System",
+                category: "system",
+                lastModified: new Date().toISOString(),
+                version: 1,
+                source: 'server'
+            };
+            serverQuotes.push(newServerQuote);
+        }
+        
+        // Occasionally remove a quote to simulate server deletion
+        if (Math.random() > 0.8 && serverQuotes.length > 2) {
+            const removeIndex = Math.floor(Math.random() * serverQuotes.length);
+            serverQuotes.splice(removeIndex, 1);
+        }
+        
+        showNotification('Successfully fetched quotes from server!');
+        return serverQuotes;
+        
+    } catch (error) {
+        console.error('Error fetching quotes from server:', error);
+        showNotification('Failed to fetch quotes from server', 'error');
+        return null;
+    }
+}
+
+// Fetch quotes from mock server (alternative implementation)
+async function fetchServerQuotes() {
+    return await fetchQuotesFromServer();
+}
+
 // Simulate server sync
 async function syncWithServer() {
     try {
         showNotification('Syncing with server...');
         
-        // Simulate server response with random data changes
-        const serverQuotes = await fetchServerQuotes();
+        // Fetch quotes from server
+        const serverQuotes = await fetchQuotesFromServer();
         
         if (serverQuotes && serverQuotes.length > 0) {
             const conflicts = mergeQuotes(serverQuotes);
@@ -391,40 +449,6 @@ async function syncWithServer() {
     }
 }
 
-// Fetch quotes from mock server
-async function fetchServerQuotes() {
-    // Simulate API call with random delay
-    await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
-    
-    // Simulate server response with some changes
-    const serverQuotes = [...quotes.map(quote => ({...quote}))];
-    
-    // Randomly modify some quotes to simulate server changes
-    if (Math.random() > 0.5 && serverQuotes.length > 0) {
-        const randomIndex = Math.floor(Math.random() * serverQuotes.length);
-        serverQuotes[randomIndex] = {
-            ...serverQuotes[randomIndex],
-            text: serverQuotes[randomIndex].text + " (Server Update)",
-            lastModified: new Date().toISOString(),
-            version: serverQuotes[randomIndex].version + 1
-        };
-    }
-    
-    // Occasionally add a new quote from server
-    if (Math.random() > 0.7) {
-        serverQuotes.push({
-            id: generateId(),
-            text: "This quote was added by the server during sync.",
-            author: "System",
-            category: "system",
-            lastModified: new Date().toISOString(),
-            version: 1
-        });
-    }
-    
-    return serverQuotes;
-}
-
 // Merge server quotes with local quotes
 function mergeQuotes(serverQuotes) {
     const conflicts = [];
@@ -449,7 +473,7 @@ function mergeQuotes(serverQuotes) {
                 // Server version is newer - use server data
                 mergedQuotes.push(serverQuote);
                 
-                if (localQuote.text !== serverQuote.text) {
+                if (localQuote.text !== serverQuote.text || localQuote.author !== serverQuote.author) {
                     conflicts.push({
                         id: localQuote.id,
                         local: localQuote,
@@ -498,12 +522,14 @@ function showConflictResolution(conflicts) {
                                 <label>
                                     <input type="radio" name="resolve-${conflict.id}" value="server" checked>
                                     <strong>Server Version:</strong> "${conflict.server.text}"
+                                    ${conflict.server.author ? `<br><em>Author: ${conflict.server.author}</em>` : ''}
                                 </label>
                             </div>
                             <div class="option">
                                 <label>
                                     <input type="radio" name="resolve-${conflict.id}" value="local">
                                     <strong>Local Version:</strong> "${conflict.local.text}"
+                                    ${conflict.local.author ? `<br><em>Author: ${conflict.local.author}</em>` : ''}
                                 </label>
                             </div>
                         </div>
@@ -533,6 +559,8 @@ function showConflictResolution(conflicts) {
 
 // Resolve conflicts based on user selection
 function resolveConflicts(conflicts) {
+    let resolvedCount = 0;
+    
     conflicts.forEach(conflict => {
         const selectedOption = document.querySelector(`input[name="resolve-${conflict.id}"]:checked`);
         
@@ -549,6 +577,7 @@ function resolveConflicts(conflicts) {
                     version: Math.max(conflict.local.version, conflict.server.version) + 1,
                     conflict: false
                 };
+                resolvedCount++;
             }
         }
     });
@@ -556,7 +585,7 @@ function resolveConflicts(conflicts) {
     saveQuotes();
     populateCategories();
     filterQuotes();
-    showNotification('Conflicts resolved successfully!');
+    showNotification(`Resolved ${resolvedCount} conflict(s) successfully!`);
 }
 
 // Update sync status display
