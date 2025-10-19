@@ -7,9 +7,49 @@
     <link rel="stylesheet" href="style.css">
   </head>
   <body>
-    <h1>Dynamic Quote Generator</h1>
-    <div id="quoteDisplay"></div>
-    <button  onclick="showRandomQuote()"id="newQuote">Show New Quote</button>
+       <h1>Dynamic Quote Generator</h1>
+    <p class="subtitle">Get inspired with quotes from various categories</p>
+    
+    <div class="container">
+        <div class="quote-display">
+            <div class="quote-category" id="quoteCategory">Inspiration</div>
+            <div class="quote-text" id="quoteText">Click the button to generate a random quote!</div>
+            <div class="quote-author" id="quoteAuthor"></div>
+        </div>
+        
+        <div class="controls">
+            <div class="category-selector">
+                <select id="categorySelect">
+                    <option value="all">All Categories</option>
+                    <option value="inspiration">Inspiration</option>
+                    <option value="motivation">Motivation</option>
+                    <option value="success">Success</option>
+                    <option value="life">Life</option>
+                    <option value="wisdom">Wisdom</option>
+                </select>
+            </div>
+            <button id="newQuote">Show New Quote</button>
+        </div>
+        
+        <div class="add-quote-form">
+            <h2>Add Your Own Quote</h2>
+            <div class="form-group">
+                <input type="text" id="newQuoteText" placeholder="Enter a new quote" />
+            </div>
+            <div class="form-group">
+                <input type="text" id="newQuoteAuthor" placeholder="Enter quote author (optional)" />
+            </div>
+            <div class="form-group">
+                <input type="text" id="newQuoteCategory" placeholder="Enter quote category" />
+            </div>
+            <div class="form-buttons">
+                <button id="addQuoteBtn">Add Quote</button>
+                <button id="resetForm">Reset Form</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="notification" id="notification">Quote added successfully!</div>
     <script src="script.js"></script>
   </body>
   </html>
